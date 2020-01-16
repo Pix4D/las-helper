@@ -88,6 +88,29 @@ Scale factors  [x, y, z]: [0.001, 0.001, 0.001]
 
 Cf. convert_xyz_to_las.py for an example
 
+
+**Using the PDAL pipelines**
+
+Some pre-defined PDAL pipelines are stored in the pdal_pipelines. 
+
+* pdal_assign_srs
+ 
+Overwrite the current SRS with the SRS defined in the pipeline.
+
+```
+pdal pipeline pdal_pipelines\pdal_assign_srs.json --readers.las.filename="input.las" --writers.las.filename="output.las"
+```
+
+* pdal_translate_points
+
+Move the points by some offset defined in the pipeline.
+```
+pdal pipeline pdal_pipelines\pdal_translate_points.json --readers.las.filename="input.las" --writers.las.filename="output.las"
+```
+
+
+
+
 ## Development
 
 **Formatting of the Python code**

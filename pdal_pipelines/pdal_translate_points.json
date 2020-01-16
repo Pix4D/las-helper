@@ -1,0 +1,20 @@
+{
+    "pipeline": [
+        {
+            "type": "readers.las"
+        },
+        {
+            "type":"filters.projpipeline",
+            "coord_op":"+proj=affine +yoff=-166943"
+        },
+        {
+            "type": "writers.las",
+            "scale_x": "0.001",
+            "scale_y": "0.001",
+            "scale_z": "0.001",
+            "offset_x": "auto",
+            "offset_y": "auto",
+            "offset_z": "auto"
+        }
+    ]
+}

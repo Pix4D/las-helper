@@ -9,7 +9,8 @@ data_path_xyz = [  #'./pole_to_pole_m.xyz',
     #'./pole_to_pole_feet.xyz',
     #'./point_series.xyz',
     #'./point_series_precision.xyz'
-    "./point_series_1.xyz"
+    #"./point_series_1.xyz"
+    r"E:\datasets_hdd\valid_datasets\Manually_Created\squares_plane\square_plane_5_50_100_500.xyz"
 ]
 
 for file in data_path_xyz:

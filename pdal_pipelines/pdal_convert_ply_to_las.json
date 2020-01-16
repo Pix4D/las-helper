@@ -1,0 +1,18 @@
+{
+    "pipeline": [
+        {
+            "type": "readers.ply"
+        },
+        {
+            "type": "writers.las",
+            "a_srs": "EPSG:32632",
+            "scale_x": "0.001",
+            "scale_y": "0.001",
+            "scale_z": "0.001",
+            "offset_x": "0.0",
+            "offset_y": "0.0",
+            "offset_z": "0.0",
+            "compression": "none"
+        }
+    ]
+}

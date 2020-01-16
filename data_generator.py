@@ -40,12 +40,11 @@ def create_point_cloud_square(start, end, point_per_axis):
     return np.vstack((xx.flatten(), yy.flatten(), np.zeros(len(xx.flatten())))).transpose()
 
 
-def create_point_cloud_line(start, line_length_m, line_width_m):
+def create_point_cloud_line(start, line_length_m, line_width_m, spacing=0.45):
     # For the purpose of testing, we want to have an overlap between points
     # So that the point cloud looks like a surface
     # Survey's point size is at most 50cm currently
     # Therefore, spacing of points should be less than 50cm
-    spacing = 0.45
     point_per_x = int(line_length_m / spacing) + 2
     point_per_y = int(line_width_m / spacing) + 2
 
@@ -58,7 +57,11 @@ def create_point_cloud_line(start, line_length_m, line_width_m):
         raise RuntimeError(f"Computed step ({step}m) is bigger than spacing ({spacing}m)")
 
     xx, yy, = np.meshgrid(x, y)
-    return np.vstack((xx.flatten(), yy.flatten(), np.zeros(len(xx.flatten())))).transpose()
+    xx_flat = xx.flatten()
+    print(f"Mesh generated: {len(xx_flat)} points. Dtype:{xx.dtype}")
+    yy_flat = yy.flatten()
+    zz_flat = np.zeros(len(xx_flat))
+    return np.vstack((xx_flat, yy_flat, zz_flat)).transpose()
 
 
 # write_data("square_sweden.las", create_point_cloud_square(start_position, end_position, 100))
@@ -67,5 +70,6 @@ def create_point_cloud_line(start, line_length_m, line_width_m):
 # write_data("empty_square_4km_sweden.las", create_point_cloud_empty_square_width(start_position, 4000, 10000))
 # write_data("line_5km_sweden.las", create_point_cloud_line(start_position, 5000, 500))
 # write_data("line_50km_sweden.las", create_point_cloud_line(start_position, 50000, 500))
-write_data("line_500km_sweden.las", create_point_cloud_line(start_position, 500000, 100))
-# write_data("line_100km_sweden.las", create_point_cloud_line(start_position, 100000, 60))
+# write_data("line_500km_sweden.las", create_point_cloud_line(start_position, 500000, 100))
+# write_data(r"E:\datasets_hdd\valid_datasets\Manually_Created\line_100km_sweden.las", create_point_cloud_line(start_position, 100000, 60))
+write_data(r"E:\datasets_hdd\valid_datasets\Manually_Created\line_100km_sweden_1G_pts.las", create_point_cloud_line(start_position, 100000, 50, 0.1))

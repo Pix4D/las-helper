@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import laspy
 import numpy as np
 
@@ -63,7 +61,9 @@ class LasHelper:
             round((x + y) / 2)
             for x, y in zip(self.__las_file.header.min, self.__las_file.header.max)
         ]
+        print(f"Offset: {offset}")
         scale = self.__las_file.header.scale
+        print(f"Scale: {scale}")
 
         self.__las_file.X = [round(x) for x in ((points_scaled[:, 0] - offset[0]) / scale[0])]
         self.__las_file.Y = [round(x) for x in ((points_scaled[:, 1] - offset[1]) / scale[1])]
