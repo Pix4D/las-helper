@@ -87,6 +87,7 @@ class LasHelper:
 
 
 def test_las_export_and_import(out_file_path):
+    print("\n# Test LasHelper - import and export")
     input_points = np.array(
         [
             [-300.123, -30.123, -3.123],
@@ -161,15 +162,10 @@ def read_bytes(file_path, start_byte_pos, length):
 
 
 def write_bytes(file_path, start_byte_pos, byte_str):
-    if len(byte_str) <= 0:
-        return
-
-    if file_path == "" or os.path.isfile(file_path) is not True:
-        return
-
-    with open(file_path, "r+b") as f:
-        f.seek(start_byte_pos)
-        f.write(byte_str)
+    if len(byte_str) > 0 and file_path != "" and os.path.isfile(file_path) is True:
+        with open(file_path, "r+b") as f:
+            f.seek(start_byte_pos)
+            f.write(byte_str)
 
 
 # LAS format 1.2
@@ -223,6 +219,8 @@ property_descriptors = {
     "version_major": HeaderPropertyDescriptor(24, 1, "B"),
     "version_minor": HeaderPropertyDescriptor(25, 1, "B"),
     "offset_to_point_data": HeaderPropertyDescriptor(96, 4, "L"),
+    "point_data_format_id": HeaderPropertyDescriptor(104, 1, "B"),
+    "point_data_record_length": HeaderPropertyDescriptor(105, 2, "H"),
     "number_of_point_records": HeaderPropertyDescriptor(107, 4, "L"),
     "x_scale": HeaderPropertyDescriptor(131, 8, "d"),
     "y_scale": HeaderPropertyDescriptor(139, 8, "d"),
@@ -242,6 +240,8 @@ property_descriptors = {
 class Pix4DLasHeader:
     """A home made LAS header reader and writer"""
 
+    MAX_NUMBER_OF_POINT_RECORDS_V12 = 4294967295
+    
     def __init__(self, file_path=""):
         self.file_path = file_path
         if self.file_signature != "LASF":
@@ -279,9 +279,15 @@ class Pix4DLasHeader:
     offset_to_point_data = property(
         lambda self: self.read_property(property_descriptors["offset_to_point_data"])
     )
+    point_data_format_id = property(
+        lambda self: self.read_property(property_descriptors["point_data_format_id"])
+    )
+    point_data_record_length = property(
+        lambda self: self.read_property(property_descriptors["point_data_record_length"])
+    )
     number_of_point_records = property(
-        fget=lambda self: self.read_property(property_descriptors["number_of_point_records"]),
-        fset=lambda self, value: self.write_property(
+        lambda self: self.read_property(property_descriptors["number_of_point_records"]),
+        lambda self, value: self.write_property(
             property_descriptors["number_of_point_records"], value
         ),
     )
@@ -335,12 +341,15 @@ class Pix4DLasHeader:
     )
 
 
-def test_Pix4DLasHelper(in_file_path):
+def test_Pix4DLasHeader(in_file_path):
+    print("\n# Test Pix4DLasHeader")
     lr = Pix4DLasHeader(in_file_path)
     lh = laspy.file.File(in_file_path, mode="r")
     assert lr.offset_to_point_data == lh.header.data_offset
     assert lr.major_version == lh.header.major_version
     assert lr.minor_version == lh.header.minor_version
+    assert lr.point_data_format_id == lh.header.data_format_id
+    assert lr.point_data_record_length == lh.header.data_record_length
     assert lr.number_of_point_records == lh.header.records_count
     assert lr.x_scale == lh.header.scale[0]
     assert lr.y_scale == lh.header.scale[1]
@@ -354,9 +363,95 @@ def test_Pix4DLasHelper(in_file_path):
     assert lr.y_min == lh.header.min[1]
     assert lr.z_max == lh.header.max[2]
     assert lr.z_min == lh.header.min[2]
+    print("Test successful")
 
 
-def merge_las_files(las_file_path_1, las_file_path_2, output_path):
+def extract_LAS_file_header_and_vlr(las_file_path_to, las_file_path_from):
+    """Copy LAS header and VLR from las_file_path_from to las_file_path_to"""
+    header_from = Pix4DLasHeader(las_file_path_from)
+
+    with open(las_file_path_to, "ab") as f_to:
+        with open(las_file_path_from, "rb") as f_from:
+            tmp = f_from.read(header_from.offset_to_point_data)
+            n = f_to.write(tmp)
+    print(f"Written {n} bytes in new file")
+
+    header_to = Pix4DLasHeader(las_file_path_to)
+    header_to.number_of_point_records = 0
+
+
+def append_point_data_records_bytes(las_file_path_to, las_file_path_from, point_offset=0, point_count=0, fill_up=False):
+    """This is a low-level function to append the Point Data Records section of a LAS file (at path
+    las_file_path_from) to the existing Point Data Records section of another LAS file (at path
+    las_file_path_to).
+
+    Note: Does not touch other parts of the edited LAS file. Therefore, after the copy, the LAS
+    file does not match the format standard anymore because the number of points in the header does
+    not match the actual number of points.
+
+    Arguments
+        las_file_path_to:   Path to LAS file to which point records are added
+        las_file_path_from: Path to LAS file from which point records are copied
+        point_offset:       First point to be copied
+        point_count:        Count of points to be copied. If 0, will copy everything
+        fill_up:            If True, if file_from has too many points to fit in file_to, will try
+                            to fit as much point as the limit allows. Otherwise, will raise an
+                            Exception.
+    """
+    header_to = Pix4DLasHeader(las_file_path_to)
+    header_from = Pix4DLasHeader(las_file_path_from)
+
+    if point_offset < 0:
+        raise Exception("point_offset should be positive")
+
+    if point_offset + point_count > header_from.number_of_point_records:
+        raise Exception(f"Invalid point_offset ({point_offset}) and point_count ({point_count})"
+                        f" values. Sum should be lower than point record count "
+                        f"({header_from.number_of_point_records})")
+
+    if point_count == 0:
+        count_to_be_copied = header_from.number_of_point_records
+    else:
+        count_to_be_copied = point_count
+
+    if (
+        header_to.number_of_point_records + count_to_be_copied
+        > Pix4DLasHeader.MAX_NUMBER_OF_POINT_RECORDS_V12
+    ):
+        if fill_up is not True:
+            raise Exception(
+                f"Cannot fit point data records of '{os.path.basename(las_file_path_from)}' into "
+                f"'{os.path.basename(las_file_path_to)}'. Limit of point records is "
+                f"{Pix4DLasHeader.MAX_NUMBER_OF_POINT_RECORDS_V12} for this format."
+            )
+        else:
+            count_to_be_copied = Pix4DLasHeader.MAX_NUMBER_OF_POINT_RECORDS_V12 - header_to.number_of_point_records
+
+    # print(f"File 1 size: {os.path.getsize(las_file_path_to)} B")
+    # print(f"File 2 size: {os.path.getsize(las_file_path_from)} B")
+    # print(f"File 2 start of point data records: {header_from.read_offset_to_point_data()} B")
+    cc = count_to_be_copied
+    batch_size = 1000
+
+    with open(las_file_path_to, "ab") as f_to:
+        with open(las_file_path_from, "rb") as f_from:
+            # Moves fd to start of point data records
+            f_from.seek(header_from.offset_to_point_data + point_offset * header_from.point_data_record_length)
+            while cc > 0:
+                if cc > batch_size:
+                    tmp = f_from.read(batch_size * header_from.point_data_record_length)
+                    cc -= batch_size
+                else:
+                    tmp = f_from.read(cc * header_from.point_data_record_length)
+                    cc = 0
+                f_to.write(tmp)
+    print(f"Written {count_to_be_copied} point data records in new file")
+
+    # print(f"File 1 size: {os.path.getsize(las_file_path_to)}")
+    return count_to_be_copied
+
+
+def merge_las_files(las_file_path_1, las_file_path_2, output_path, fill_up=False):
     lr1 = Pix4DLasHeader(las_file_path_1)
     lr2 = Pix4DLasHeader(las_file_path_2)
 
@@ -372,25 +467,11 @@ def merge_las_files(las_file_path_1, las_file_path_2, output_path):
     shutil.copyfile(las_file_path_1, output_path)
 
     print("Add Point Data Records from file 2")
-    # print(f"File 2 size: {os.path.getsize(las_file_path_2)}")
-    # print(f"File 2 start of point data records: {lr2.read_offset_to_point_data()}")
-    cc = 0
-    with open(output_path, "ab") as f_out:
-        with open(las_file_path_2, "rb") as f_in:
-            # Moves fd to start of point data records
-            f_in.seek(lr2.offset_to_point_data)
-            tmp = f_in.read(1000)
-            while tmp:
-                n = f_out.write(tmp)
-                cc += n
-                tmp = f_in.read(1000)
-    print(f"Written {cc} bytes in new file")
+    append_point_data_records_bytes(output_path, las_file_path_2, fill_up)
 
     # Set Point Record Count
     lh_out = Pix4DLasHeader(output_path)
-
     lh_out.number_of_point_records = lr1.number_of_point_records + lr2.number_of_point_records
-
     lh_out.x_max = max(lr1.x_max, lr2.x_max)
     lh_out.x_min = min(lr1.x_min, lr2.x_min)
     lh_out.y_max = max(lr1.y_max, lr2.y_max)
@@ -400,6 +481,8 @@ def merge_las_files(las_file_path_1, las_file_path_2, output_path):
 
 
 def test_merge_las_files():
+    print("\n# Test merge_las_files")
+
     pc_path_1 = "merge_small_1.las"
     pc_path_2 = "merge_small_2.las"
     out_path = "out.las"
@@ -419,11 +502,14 @@ def test_merge_las_files():
     assert lh_out.z_max == max(lh1.z_max, lh2.z_max)
     assert lh_out.z_min == min(lh1.z_min, lh2.z_min)
 
+    print("Test successful")
 
-def append_las_files(las_file_path_1, las_file_path_2):
-    lr1 = Pix4DLasHeader(las_file_path_1)
-    lr2 = Pix4DLasHeader(las_file_path_2)
-    initial_point_count = lr1.number_of_point_records
+
+def append_las_files(las_file_main_path, las_file_from_path, fill_up=False):
+    """Append point data records of LAS file at las_file_from_path to LAS file at
+    las_file_main_path. Then update the number of points and the boundaries in the header"""
+    lr1 = Pix4DLasHeader(las_file_main_path)
+    lr2 = Pix4DLasHeader(las_file_from_path)
 
     print("Checking if files offsets and scales match")
     assert lr1.x_scale == lr2.x_scale
@@ -434,22 +520,10 @@ def append_las_files(las_file_path_1, las_file_path_2):
     assert lr1.z_offset == lr2.z_offset
 
     print("Add Point Data Records from file 2")
-    # print(f"File 2 size: {os.path.getsize(las_file_path_2)}")
-    # print(f"File 2 start of point data records: {lr2.read_offset_to_point_data()}")
-    cc = 0
-    with open(las_file_path_1, "ab") as f_out:
-        with open(las_file_path_2, "rb") as f_in:
-            # Moves fd to start of point data records
-            f_in.seek(lr2.offset_to_point_data)
-            tmp = f_in.read(1000)
-            while tmp:
-                n = f_out.write(tmp)
-                cc += n
-                tmp = f_in.read(1000)
-    print(f"Written {cc} bytes in new file")
+    n = append_point_data_records_bytes(las_file_main_path, las_file_from_path, fill_up)
 
     # Set Point Record Count
-    lr1.number_of_point_records += lr2.number_of_point_records
+    lr1.number_of_point_records += n
 
     lr1.x_max = max(lr1.x_max, lr2.x_max)
     lr1.x_min = min(lr1.x_min, lr2.x_min)
@@ -460,7 +534,8 @@ def append_las_files(las_file_path_1, las_file_path_2):
 
 
 def test_append_las_file(pc_path_1):
-    pc_path_2 = "merge_small_2.las"
+    print("\n# Test append_las_files")
+    pc_path_2 = "test_tmp_2.las"
 
     lh1 = LasHelper(pc_path_1, "r")
     initial_point_count = lh1.get_point_count()
@@ -469,7 +544,7 @@ def test_append_las_file(pc_path_1):
 
     lh1 = Pix4DLasHeader(pc_path_1)
     lh2 = Pix4DLasHeader(pc_path_2)
-    assert lh1.number_of_point_records() == initial_point_count + lh2.number_of_point_records()
+    assert lh1.number_of_point_records == initial_point_count + lh2.number_of_point_records
     assert lh1.x_max == max(lh1.x_max, lh2.x_max)
     assert lh1.x_min == min(lh1.x_min, lh2.x_min)
     assert lh1.y_max == max(lh1.y_max, lh2.y_max)
@@ -477,20 +552,60 @@ def test_append_las_file(pc_path_1):
     assert lh1.z_max == max(lh1.z_max, lh2.z_max)
     assert lh1.z_min == min(lh1.z_min, lh2.z_min)
 
+    print("Test successful")
 
-if __name__ == "__main__":
+
+def split_las_files(in_las_file_path, ratio=0.5):
+    '''Split LAS file in 2 files by distributing the point data records according to the ratio.
+    The header and VLR are copied as they are.'''
+    if ratio <= 0.0 or ratio >= 1.0:
+        raise Exception("Invalid ratio value. Should be within [0.0-1.0]")
+
+    header_from = Pix4DLasHeader(in_las_file_path)
+
+    file_1_path = f"{os.path.splitext(in_las_file_path)[0]}_1.las"
+    file_2_path = f"{os.path.splitext(in_las_file_path)[0]}_2.las"
+
+    extract_LAS_file_header_and_vlr(file_1_path, in_las_file_path)
+    count_to_copy_to_file_1 = int(header_from.number_of_point_records * ratio)
+    append_point_data_records_bytes(file_1_path, in_las_file_path, point_count=count_to_copy_to_file_1)
+    Pix4DLasHeader(file_1_path).number_of_point_records = count_to_copy_to_file_1
+
+    extract_LAS_file_header_and_vlr(file_2_path, in_las_file_path)
+    count_to_copy_to_file_2 = header_from.number_of_point_records - count_to_copy_to_file_1
+    append_point_data_records_bytes(file_2_path, in_las_file_path, point_offset=count_to_copy_to_file_1, point_count=count_to_copy_to_file_2)
+    Pix4DLasHeader(file_2_path).number_of_point_records = count_to_copy_to_file_2
+
+    return [file_1_path, file_2_path]
+
+
+def test_split_las_files(test_file_path):
+    print("\n# Test split_las_files")
+    header_from = Pix4DLasHeader(test_file_path)
+
+    ratio = 0.5
+    count_1 = int(header_from.number_of_point_records * ratio)
+    count_2 = header_from.number_of_point_records - count_1
+
+    [out_path_1, out_path_2] = split_las_files(test_file_path, ratio=ratio)
+
+    header_out_1 = Pix4DLasHeader(out_path_1)
+    assert header_out_1.number_of_point_records == count_1
+    header_out_2 = Pix4DLasHeader(out_path_2)
+    assert header_out_2.number_of_point_records == count_2
+
+    print("Test successful")
+
+
+def unit_tests():
     # Unit tests
     out_file_path = "tmp.las"
     # test_las_export_and_import(out_file_path)
-    # test_Pix4DLasHelper(out_file_path)
+    # test_Pix4DLasHeader(out_file_path)
     # test_merge_las_files()
     # test_append_las_file(out_file_path)
+    test_split_las_files(out_file_path)
 
-    file1_path = r"E:\datasets_hdd\valid_datasets\LAS_only\AerialWasatchLidarSubset\AerialWasatchLidar_WestSubset_2367MioPoints.las"
-    file2_path = r"E:\datasets_hdd\valid_datasets\LAS_only\AerialWasatchLidarSubset\merge6.las"
-    out_path = r"E:\datasets_hdd\valid_datasets\LAS_only\AerialWasatchLidarSubset\merge123456.las"
-    merge_las_files(file1_path, file2_path, out_path)
 
-    # file1_path = r"E:\datasets_hdd\valid_datasets\LAS_only\AerialWasatchLidarSubset\merge123.las"
-    # file2_path = r"E:\datasets_hdd\valid_datasets\LAS_only\AerialWasatchLidarSubset\merge3.las"
-    # append_las_files(file1_path, file2_path)
+if __name__ == "__main__":
+    unit_tests()
